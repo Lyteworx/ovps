@@ -2,9 +2,19 @@
 .env
 compose/.env
 
-# Runtime data
+# Runtime data - persistent storage
 data/persistent/*
 !data/persistent/.gitkeep
+
+# Runtime data - ingest pipeline (keep directory structure)
+data/ingest/incoming/*
+!data/ingest/incoming/.gitkeep
+data/ingest/processing/*
+!data/ingest/processing/.gitkeep
+data/ingest/completed/*
+!data/ingest/completed/.gitkeep
+data/ingest/failed/*
+!data/ingest/failed/.gitkeep
 
 # OS files
 .DS_Store

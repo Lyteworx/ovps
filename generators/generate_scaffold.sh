@@ -71,6 +71,10 @@ mkdir -p "$OUTPUT_DIR/scripts"
 mkdir -p "$OUTPUT_DIR/data/persistent"
 mkdir -p "$OUTPUT_DIR/data/sample_data"
 mkdir -p "$OUTPUT_DIR/data/schemas"
+mkdir -p "$OUTPUT_DIR/data/ingest/incoming"
+mkdir -p "$OUTPUT_DIR/data/ingest/processing"
+mkdir -p "$OUTPUT_DIR/data/ingest/completed"
+mkdir -p "$OUTPUT_DIR/data/ingest/failed"
 mkdir -p "$OUTPUT_DIR/checksums"
 
 # Create placeholder files with explanatory comments
@@ -135,6 +139,46 @@ cat > "$OUTPUT_DIR/data/schemas/.gitkeep" << 'EOF'
 # other structural definitions here
 EOF
 
+cat > "$OUTPUT_DIR/data/ingest/incoming/.gitkeep" << 'EOF'
+# Incoming data directory
+# Place data files here for processing by the application
+# Files in this directory are waiting to be processed
+#
+# Workflow:
+#   1. External system drops files here
+#   2. Application picks up files for processing
+#   3. Files move to processing/ while being worked on
+#   4. Files move to completed/ or failed/ when done
+EOF
+
+cat > "$OUTPUT_DIR/data/ingest/processing/.gitkeep" << 'EOF'
+# Processing directory
+# Files currently being processed by the application
+# This directory acts as a lock/staging area to prevent
+# double-processing of the same file
+#
+# Files should only be here temporarily during active processing
+EOF
+
+cat > "$OUTPUT_DIR/data/ingest/completed/.gitkeep" << 'EOF'
+# Completed directory
+# Successfully processed files are moved here
+# These files can be archived or deleted based on retention policy
+#
+# Consider implementing automatic cleanup of old files
+EOF
+
+cat > "$OUTPUT_DIR/data/ingest/failed/.gitkeep" << 'EOF'
+# Failed directory
+# Files that failed processing are moved here for review
+# Check application logs for failure reasons
+#
+# Files here may need:
+#   - Manual review and correction
+#   - Retry after fixing issues
+#   - Escalation to support
+EOF
+
 cat > "$OUTPUT_DIR/checksums/.gitkeep" << 'EOF'
 # Checksums directory
 # sha256.txt will be generated here containing SHA256 hashes
@@ -147,9 +191,19 @@ cat > "$OUTPUT_DIR/.gitignore" << 'EOF'
 .env
 compose/.env
 
-# Runtime data
+# Runtime data - persistent storage
 data/persistent/*
 !data/persistent/.gitkeep
+
+# Runtime data - ingest pipeline (keep directory structure)
+data/ingest/incoming/*
+!data/ingest/incoming/.gitkeep
+data/ingest/processing/*
+!data/ingest/processing/.gitkeep
+data/ingest/completed/*
+!data/ingest/completed/.gitkeep
+data/ingest/failed/*
+!data/ingest/failed/.gitkeep
 
 # OS files
 .DS_Store
@@ -175,7 +229,12 @@ log_info "  ├── scripts/"
 log_info "  ├── data/"
 log_info "  │   ├── persistent/"
 log_info "  │   ├── sample_data/"
-log_info "  │   └── schemas/"
+log_info "  │   ├── schemas/"
+log_info "  │   └── ingest/"
+log_info "  │       ├── incoming/"
+log_info "  │       ├── processing/"
+log_info "  │       ├── completed/"
+log_info "  │       └── failed/"
 log_info "  └── checksums/"
 
 exit 0

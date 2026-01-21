@@ -1,0 +1,6 @@
+# Processing directory
+# Files currently being processed by the application
+# This directory acts as a lock/staging area to prevent
+# double-processing of the same file
+#
+# Files should only be here temporarily during active processing

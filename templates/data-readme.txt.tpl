@@ -10,7 +10,12 @@ Directory Layout:
 data/
 ├── persistent/     # Persistent storage (survives upgrades)
 ├── sample_data/    # Initial/seed data (copied on first install)
-└── schemas/        # Database and configuration schemas
+├── schemas/        # Database and configuration schemas
+└── ingest/         # Data ingestion pipeline
+    ├── incoming/   # Files waiting to be processed
+    ├── processing/ # Files currently being processed
+    ├── completed/  # Successfully processed files
+    └── failed/     # Files that failed processing
 
 
 persistent/
@@ -46,6 +51,51 @@ Structural definitions for validation and documentation.
 - API specifications (OpenAPI, etc.)
 
 These files are for reference and validation, not runtime use.
+
+
+ingest/
+-------
+Data ingestion pipeline for ETL/ELT workflows. External systems can drop
+files here for processing by the application.
+
+Workflow:
+  1. External system drops files into incoming/
+  2. Application picks up files and moves them to processing/
+  3. After processing completes:
+     - Success: File moves to completed/
+     - Failure: File moves to failed/
+
+Directory Details:
+
+  incoming/
+    - Drop zone for new data files
+    - Files here are waiting to be picked up
+    - Application should poll or watch this directory
+
+  processing/
+    - Files currently being processed
+    - Acts as a lock to prevent double-processing
+    - Files should only be here temporarily
+
+  completed/
+    - Successfully processed files
+    - Can be archived or deleted based on retention policy
+    - Consider automatic cleanup of old files
+
+  failed/
+    - Files that failed processing
+    - Check application logs for failure reasons
+    - May need manual review, correction, or retry
+
+Volume mapping in docker-compose.yaml:
+  volumes:
+    - ../data/ingest:/app/ingest
+
+Implementation Notes:
+- Use atomic move operations (mv) to transition files between directories
+- Include timestamp or unique ID in filenames to avoid collisions
+- Consider file locking for multi-process scenarios
+- Log all file transitions for audit trail
 
 
 Backup Recommendations:

@@ -1,0 +1,9 @@
+# Incoming data directory
+# Place data files here for processing by the application
+# Files in this directory are waiting to be processed
+#
+# Workflow:
+#   1. External system drops files here
+#   2. Application picks up files for processing
+#   3. Files move to processing/ while being worked on
+#   4. Files move to completed/ or failed/ when done
