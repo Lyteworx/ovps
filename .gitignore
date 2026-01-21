@@ -19,5 +19,9 @@ Thumbs.db
 # but we want to keep the directory structure
 !scaffolds/base/
 
-# Keep prompts directory even if empty
-!prompts/
+# AI-specific files (excluded from public release)
+CLAUDE.md
+.claude/
+.claudeignore
+project-plan.md
+prompts/
