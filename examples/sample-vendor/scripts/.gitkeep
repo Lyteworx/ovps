@@ -1,0 +1,13 @@
+# Scripts directory
+# Required POSIX shell scripts:
+# - validate_environment.sh: Verify Docker, disk space, CPU architecture
+# - validate_containers.sh: Load and verify container images
+# - install.sh: Full deployment via Docker Compose
+# - upgrade.sh: Version transitions preserving persistent data
+# - healthcheck.sh: Verify containers running and services responding
+#
+# All scripts must:
+# - Be POSIX-compliant (#!/bin/sh)
+# - Be idempotent (safe to run multiple times)
+# - Use explicit exit codes
+# - Provide verbose logging

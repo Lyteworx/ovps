@@ -1,0 +1,19 @@
+# Environment files (contain secrets)
+.env
+compose/.env
+
+# Runtime data
+data/persistent/*
+!data/persistent/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Backup files from upgrades
+backups/

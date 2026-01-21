@@ -1,0 +1,6 @@
+# Docker Compose directory
+# Place docker-compose.yaml here
+# Requirements:
+# - Must reference local images only (no remote pulls)
+# - Must run standalone without internet access
+# - Must define all required services

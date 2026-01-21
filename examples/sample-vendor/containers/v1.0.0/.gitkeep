@@ -1,0 +1,7 @@
+# Container images directory
+# Place container images here in one of these formats:
+# - .tar.gz (Docker save format, gzip compressed)
+# - .oci (OCI image layout format)
+#
+# Images must be loadable offline using:
+#   docker load < image.tar.gz

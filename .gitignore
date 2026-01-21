@@ -1,0 +1,23 @@
+# OVPS Project .gitignore
+
+# Generated test packages (keep examples/)
+*-v[0-9]*.[0-9]*.[0-9]*/
+*.tar.gz
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Scaffolds base gitkeep files are intentionally empty
+# but we want to keep the directory structure
+!scaffolds/base/
+
+# Keep prompts directory even if empty
+!prompts/

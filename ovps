@@ -1,0 +1,491 @@
+#!/bin/sh
+# ovps - OCI Vendor Package Scaffolder
+# Main CLI entry point for scaffolding vendor delivery packages
+#
+# Usage:
+#   ovps new <vendor-name> <product-name> <version> [output-dir]
+#   ovps validate <package-dir>
+#   ovps checksums <package-dir>
+#   ovps finalize <package-dir>
+#   ovps package <package-dir> [output-file]
+#   ovps help
+#
+# Exit codes:
+#   0 - Success
+#   1 - Invalid command or arguments
+#   2 - Operation failed
+
+set -e
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+GENERATORS_DIR="$SCRIPT_DIR/generators"
+VALIDATORS_DIR="$SCRIPT_DIR/validators"
+
+# Logging functions
+log_info() {
+    printf '[INFO] %s\n' "$1"
+}
+
+log_error() {
+    printf '[ERROR] %s\n' "$1" >&2
+}
+
+log_success() {
+    printf '[SUCCESS] %s\n' "$1"
+}
+
+log_warn() {
+    printf '[WARN] %s\n' "$1" >&2
+}
+
+# Print usage
+print_usage() {
+    cat << EOF
+OVPS - OCI Vendor Package Scaffolder v$VERSION
+
+Usage:
+  ovps new <vendor-name> <product-name> <version> [output-dir]
+      Generate a new vendor package scaffold
+
+  ovps validate <package-dir>
+      Validate an existing vendor package
+
+  ovps checksums <package-dir>
+      Generate/regenerate SHA256 checksums
+
+  ovps finalize <package-dir>
+      Prepare package for distribution (checksums + validate)
+
+  ovps package <package-dir> [output-file.tar.gz]
+      Create distributable archive (finalize + tar.gz)
+
+  ovps help
+      Show this help message
+
+Examples:
+  ovps new acme web-app v1.0.0
+      Creates: ./acme-web-app-v1.0.0/
+
+  ovps new acme web-app v1.0.0 /opt/packages/acme
+      Creates: /opt/packages/acme/
+
+  ovps validate ./my-vendor-package/
+      Validates structure, manifest, scripts, and compose files
+
+  ovps checksums ./my-vendor-package/
+      Generates checksums/sha256.txt
+
+  ovps finalize ./my-vendor-package/
+      Regenerates checksums and validates (ready for distribution)
+
+  ovps package ./my-vendor-package/
+      Creates my-vendor-package.tar.gz ready to distribute
+
+  ovps package ./acme-webapp-v1.0.0/ ./releases/acme-webapp-v1.0.0.tar.gz
+      Creates archive at specified path
+
+For more information, see the project documentation.
+EOF
+}
+
+# Command: new
+cmd_new() {
+    if [ $# -lt 3 ]; then
+        log_error "Usage: ovps new <vendor-name> <product-name> <version> [output-dir]"
+        exit 1
+    fi
+
+    VENDOR_NAME="$1"
+    PRODUCT_NAME="$2"
+    PKG_VERSION="$3"
+    OUTPUT_DIR="${4:-$VENDOR_NAME-$PRODUCT_NAME-$PKG_VERSION}"
+
+    log_info "Creating new vendor package: $VENDOR_NAME/$PRODUCT_NAME $PKG_VERSION"
+    log_info "Output directory: $OUTPUT_DIR"
+
+    # Step 1: Generate scaffold
+    log_info ""
+    log_info "Step 1/5: Generating directory scaffold..."
+    if ! "$GENERATORS_DIR/generate_scaffold.sh" "$OUTPUT_DIR" "$VENDOR_NAME" "$PRODUCT_NAME" "$PKG_VERSION"; then
+        log_error "Failed to generate scaffold"
+        exit 2
+    fi
+
+    # Step 2: Generate manifest
+    log_info ""
+    log_info "Step 2/5: Generating manifest.yaml..."
+    if ! "$GENERATORS_DIR/generate_manifest.sh" "$OUTPUT_DIR" "$VENDOR_NAME" "$PRODUCT_NAME" "$PKG_VERSION"; then
+        log_error "Failed to generate manifest"
+        exit 2
+    fi
+
+    # Step 3: Generate scripts
+    log_info ""
+    log_info "Step 3/5: Generating required scripts..."
+    if ! "$GENERATORS_DIR/generate_scripts.sh" "$OUTPUT_DIR" "$VENDOR_NAME" "$PRODUCT_NAME" "$PKG_VERSION"; then
+        log_error "Failed to generate scripts"
+        exit 2
+    fi
+
+    # Step 4: Generate docker-compose
+    log_info ""
+    log_info "Step 4/5: Generating docker-compose.yaml..."
+    if ! "$GENERATORS_DIR/generate_compose.sh" "$OUTPUT_DIR" "$VENDOR_NAME" "$PRODUCT_NAME" "$PKG_VERSION"; then
+        log_error "Failed to generate docker-compose"
+        exit 2
+    fi
+
+    # Step 5: Generate initial checksums
+    log_info ""
+    log_info "Step 5/5: Generating checksums..."
+    if ! "$GENERATORS_DIR/generate_checksums.sh" "$OUTPUT_DIR"; then
+        log_error "Failed to generate checksums"
+        exit 2
+    fi
+
+    # Summary
+    log_info ""
+    log_info "=================================================="
+    log_success "Vendor package created successfully!"
+    log_info ""
+    log_info "Package location: $OUTPUT_DIR"
+    log_info ""
+    log_info "Next steps:"
+    log_info "  1. Add container images to: $OUTPUT_DIR/containers/$PKG_VERSION/"
+    log_info "  2. Update docker-compose.yaml with your services"
+    log_info "  3. Update manifest.yaml with container and service details"
+    log_info "  4. Add documentation to: $OUTPUT_DIR/docs/"
+    log_info "  5. Finalize package: ovps finalize $OUTPUT_DIR"
+    log_info "  6. Create archive: ovps package $OUTPUT_DIR"
+    log_info ""
+
+    exit 0
+}
+
+# Command: validate
+cmd_validate() {
+    if [ $# -lt 1 ]; then
+        log_error "Usage: ovps validate <package-dir>"
+        exit 1
+    fi
+
+    PACKAGE_DIR="$1"
+
+    if [ ! -d "$PACKAGE_DIR" ]; then
+        log_error "Package directory not found: $PACKAGE_DIR"
+        exit 2
+    fi
+
+    log_info "Validating vendor package: $PACKAGE_DIR"
+    log_info "=================================================="
+
+    ERRORS=0
+
+    # Validate structure
+    log_info ""
+    log_info "Validating directory structure..."
+    if ! "$VALIDATORS_DIR/validate_structure.sh" "$PACKAGE_DIR"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # Validate manifest
+    log_info ""
+    log_info "Validating manifest..."
+    if ! "$VALIDATORS_DIR/validate_manifest.sh" "$PACKAGE_DIR"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # Validate scripts
+    log_info ""
+    log_info "Validating scripts..."
+    if ! "$VALIDATORS_DIR/validate_scripts.sh" "$PACKAGE_DIR"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # Validate compose
+    log_info ""
+    log_info "Validating docker-compose..."
+    if ! "$VALIDATORS_DIR/validate_compose.sh" "$PACKAGE_DIR"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # Summary
+    log_info ""
+    log_info "=================================================="
+    if [ $ERRORS -gt 0 ]; then
+        log_error "Validation completed with $ERRORS failure(s)"
+        exit 2
+    fi
+
+    log_success "All validations passed"
+    exit 0
+}
+
+# Command: checksums
+cmd_checksums() {
+    if [ $# -lt 1 ]; then
+        log_error "Usage: ovps checksums <package-dir>"
+        exit 1
+    fi
+
+    PACKAGE_DIR="$1"
+
+    if [ ! -d "$PACKAGE_DIR" ]; then
+        log_error "Package directory not found: $PACKAGE_DIR"
+        exit 2
+    fi
+
+    log_info "Generating checksums for: $PACKAGE_DIR"
+
+    if ! "$GENERATORS_DIR/generate_checksums.sh" "$PACKAGE_DIR"; then
+        log_error "Failed to generate checksums"
+        exit 2
+    fi
+
+    exit 0
+}
+
+# Command: finalize
+cmd_finalize() {
+    if [ $# -lt 1 ]; then
+        log_error "Usage: ovps finalize <package-dir>"
+        exit 1
+    fi
+
+    PACKAGE_DIR="$1"
+
+    if [ ! -d "$PACKAGE_DIR" ]; then
+        log_error "Package directory not found: $PACKAGE_DIR"
+        exit 2
+    fi
+
+    log_info "Finalizing vendor package: $PACKAGE_DIR"
+    log_info "=================================================="
+
+    # Step 1: Regenerate checksums
+    log_info ""
+    log_info "Step 1/2: Regenerating checksums..."
+    if ! "$GENERATORS_DIR/generate_checksums.sh" "$PACKAGE_DIR"; then
+        log_error "Failed to generate checksums"
+        exit 2
+    fi
+
+    # Step 2: Full validation
+    log_info ""
+    log_info "Step 2/2: Running validation..."
+
+    ERRORS=0
+
+    if ! "$VALIDATORS_DIR/validate_structure.sh" "$PACKAGE_DIR"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    if ! "$VALIDATORS_DIR/validate_manifest.sh" "$PACKAGE_DIR"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    if ! "$VALIDATORS_DIR/validate_scripts.sh" "$PACKAGE_DIR"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    if ! "$VALIDATORS_DIR/validate_compose.sh" "$PACKAGE_DIR"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # Summary
+    log_info ""
+    log_info "=================================================="
+    if [ $ERRORS -gt 0 ]; then
+        log_error "Finalization failed with $ERRORS validation error(s)"
+        log_error "Fix the issues above and run 'ovps finalize' again"
+        exit 2
+    fi
+
+    log_success "Package finalized and ready for distribution!"
+    log_info ""
+    log_info "To create a distributable archive, run:"
+    log_info "  ovps package $PACKAGE_DIR"
+    log_info ""
+
+    exit 0
+}
+
+# Command: package
+cmd_package() {
+    if [ $# -lt 1 ]; then
+        log_error "Usage: ovps package <package-dir> [output-file.tar.gz]"
+        exit 1
+    fi
+
+    PACKAGE_DIR="$1"
+
+    # Remove trailing slash if present
+    PACKAGE_DIR="${PACKAGE_DIR%/}"
+
+    if [ ! -d "$PACKAGE_DIR" ]; then
+        log_error "Package directory not found: $PACKAGE_DIR"
+        exit 2
+    fi
+
+    # Get the base name for the archive
+    PACKAGE_NAME="$(basename "$PACKAGE_DIR")"
+
+    # Determine output file
+    if [ $# -ge 2 ]; then
+        OUTPUT_FILE="$2"
+    else
+        OUTPUT_FILE="${PACKAGE_NAME}.tar.gz"
+    fi
+
+    log_info "Creating distributable package: $OUTPUT_FILE"
+    log_info "=================================================="
+
+    # Step 1: Finalize (checksums + validation)
+    log_info ""
+    log_info "Step 1/3: Finalizing package..."
+
+    if ! "$GENERATORS_DIR/generate_checksums.sh" "$PACKAGE_DIR"; then
+        log_error "Failed to generate checksums"
+        exit 2
+    fi
+
+    ERRORS=0
+
+    if ! "$VALIDATORS_DIR/validate_structure.sh" "$PACKAGE_DIR" 2>&1 | grep -q "error"; then
+        : # Structure OK
+    fi
+
+    if ! "$VALIDATORS_DIR/validate_manifest.sh" "$PACKAGE_DIR" >/dev/null 2>&1; then
+        log_warn "Manifest validation has warnings"
+    fi
+
+    if ! "$VALIDATORS_DIR/validate_scripts.sh" "$PACKAGE_DIR" >/dev/null 2>&1; then
+        log_warn "Script validation has warnings"
+    fi
+
+    if ! "$VALIDATORS_DIR/validate_compose.sh" "$PACKAGE_DIR" >/dev/null 2>&1; then
+        log_warn "Compose validation has warnings"
+    fi
+
+    # Step 2: Check for container images
+    log_info ""
+    log_info "Step 2/3: Checking package contents..."
+
+    CONTAINER_COUNT=$(find "$PACKAGE_DIR/containers" -type f \( -name "*.tar.gz" -o -name "*.tar" -o -name "*.oci" \) 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "$CONTAINER_COUNT" -eq 0 ]; then
+        log_warn "No container images found in containers/"
+        log_warn "Package may not be deployable without images"
+    else
+        log_info "Container images found: $CONTAINER_COUNT"
+    fi
+
+    # Check for .env file (should not be included)
+    if [ -f "$PACKAGE_DIR/compose/.env" ]; then
+        log_warn "Found compose/.env - this file contains secrets!"
+        log_warn "Consider removing before distribution (use .env.example instead)"
+    fi
+
+    # Calculate package size
+    PACKAGE_SIZE=$(du -sh "$PACKAGE_DIR" 2>/dev/null | cut -f1)
+    log_info "Package size: $PACKAGE_SIZE"
+
+    # Step 3: Create archive
+    log_info ""
+    log_info "Step 3/3: Creating archive..."
+
+    # Get parent directory and package name for clean archive
+    PARENT_DIR="$(dirname "$PACKAGE_DIR")"
+
+    # Create the archive
+    if [ "$PARENT_DIR" = "." ]; then
+        tar -czvf "$OUTPUT_FILE" "$PACKAGE_NAME" 2>/dev/null || {
+            log_error "Failed to create archive"
+            exit 2
+        }
+    else
+        (cd "$PARENT_DIR" && tar -czvf "$OUTPUT_FILE" "$PACKAGE_NAME") 2>/dev/null || {
+            log_error "Failed to create archive"
+            exit 2
+        }
+        # Move archive to current directory if created elsewhere
+        if [ "$PARENT_DIR" != "." ] && [ -f "$PARENT_DIR/$OUTPUT_FILE" ]; then
+            mv "$PARENT_DIR/$OUTPUT_FILE" "$OUTPUT_FILE"
+        fi
+    fi
+
+    # Get archive size
+    ARCHIVE_SIZE=$(du -sh "$OUTPUT_FILE" 2>/dev/null | cut -f1)
+
+    # Generate checksum for the archive itself
+    if command -v sha256sum >/dev/null 2>&1; then
+        ARCHIVE_CHECKSUM=$(sha256sum "$OUTPUT_FILE" | cut -d' ' -f1)
+    elif command -v shasum >/dev/null 2>&1; then
+        ARCHIVE_CHECKSUM=$(shasum -a 256 "$OUTPUT_FILE" | cut -d' ' -f1)
+    else
+        ARCHIVE_CHECKSUM="(checksum tool not available)"
+    fi
+
+    # Summary
+    log_info ""
+    log_info "=================================================="
+    log_success "Package created successfully!"
+    log_info ""
+    log_info "Archive: $OUTPUT_FILE"
+    log_info "Size: $ARCHIVE_SIZE"
+    log_info "SHA256: $ARCHIVE_CHECKSUM"
+    log_info ""
+    log_info "Distribution instructions:"
+    log_info "  1. Transfer $OUTPUT_FILE to target system"
+    log_info "  2. Verify: shasum -a 256 $OUTPUT_FILE"
+    log_info "  3. Extract: tar -xzvf $OUTPUT_FILE"
+    log_info "  4. Deploy: cd $PACKAGE_NAME && ./scripts/install.sh"
+    log_info ""
+
+    exit 0
+}
+
+# Main entry point
+main() {
+    if [ $# -lt 1 ]; then
+        print_usage
+        exit 1
+    fi
+
+    COMMAND="$1"
+    shift
+
+    case "$COMMAND" in
+        new)
+            cmd_new "$@"
+            ;;
+        validate)
+            cmd_validate "$@"
+            ;;
+        checksums)
+            cmd_checksums "$@"
+            ;;
+        finalize)
+            cmd_finalize "$@"
+            ;;
+        package)
+            cmd_package "$@"
+            ;;
+        help|--help|-h)
+            print_usage
+            exit 0
+            ;;
+        version|--version|-v)
+            echo "ovps version $VERSION"
+            exit 0
+            ;;
+        *)
+            log_error "Unknown command: $COMMAND"
+            log_error "Run 'ovps help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

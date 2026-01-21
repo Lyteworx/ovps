@@ -1,0 +1,17 @@
+# SHA256 Checksums
+# Generated: 2026-01-20T22:56:46Z
+# Package: /Users/timpetronello/Sites/ovps/examples/sample-vendor
+# Files: 9
+#
+# Verify with: sha256sum -c checksums/sha256.txt
+# Or on macOS: shasum -a 256 -c checksums/sha256.txt
+
+dffe3bb9b3d581471a1f0df3d240f05214210636f7148fb0d8256cfcc8825b27  .gitignore
+29417c6fb357b3c3c2df93459e93d5e93951dad93475b7a9288886915c8effaa  compose/.env.example
+5e8778c910ef9d1878c2097753300b3dd369aff1c98da0e1252ceaf21c438ce2  compose/docker-compose.yaml
+8fd2f19b5a52d013034361846fe14b5851666930e71d8cf38fe787606260ba46  manifest.yaml
+e6b4089b018c53900873ab3f69b07ef084599a8379ec9c9243d114a5d6e3215f  scripts/healthcheck.sh
+ad4ef378cfe164a87be83f85f069ebaff38683b9aa82e0733be36fc6ca90fec0  scripts/install.sh
+f3e90a9428f3de6f30236f3c791a0ff335897db0d78f2392274058dad2ce7746  scripts/upgrade.sh
+bec44138a21b9dc7a617b5cf16786673f66810d9a12520c4e51eb79ea4309d5e  scripts/validate_containers.sh
+33a02c74d6b526665b54902a1fa439629b931db9650867ee6c0fdff4bbe30823  scripts/validate_environment.sh
