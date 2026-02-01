@@ -8,6 +8,9 @@
 #   ovps checksums <package-dir>
 #   ovps finalize <package-dir>
 #   ovps package <package-dir> [output-file]
+#   ovps add-version <package-dir> <new-version>
+#   ovps versions <package-dir>
+#   ovps rollback <package-dir> [backup-dir]
 #   ovps help
 #
 # Exit codes:
@@ -60,6 +63,15 @@ Usage:
   ovps package <package-dir> [output-file.tar.gz]
       Create distributable archive (finalize + tar.gz)
 
+  ovps add-version <package-dir> <new-version>
+      Add a new version to an existing package
+
+  ovps versions <package-dir>
+      List available versions in a package
+
+  ovps rollback <package-dir> [backup-dir]
+      Rollback to a previous version from backup
+
   ovps help
       Show this help message
 
@@ -84,6 +96,18 @@ Examples:
 
   ovps package ./acme-webapp-v1.0.0/ ./releases/acme-webapp-v1.0.0.tar.gz
       Creates archive at specified path
+
+  ovps add-version ./acme-webapp-v1.0.0/ v1.1.0
+      Adds version v1.1.0, creates containers/v1.1.0/, regenerates scripts
+
+  ovps versions ./acme-webapp-v1.0.0/
+      Lists all version directories and shows deployed version
+
+  ovps rollback ./acme-webapp-v1.0.0/
+      Lists available backups and prompts for selection
+
+  ovps rollback ./acme-webapp-v1.0.0/ ./backups/20240115_120000
+      Restores from specific backup directory
 
 For more information, see the project documentation.
 EOF
@@ -350,10 +374,9 @@ cmd_package() {
         exit 2
     fi
 
-    ERRORS=0
-
-    if ! "$VALIDATORS_DIR/validate_structure.sh" "$PACKAGE_DIR" 2>&1 | grep -q "error"; then
-        : # Structure OK
+    # Run validations and report warnings (non-blocking for packaging)
+    if ! "$VALIDATORS_DIR/validate_structure.sh" "$PACKAGE_DIR" >/dev/null 2>&1; then
+        log_warn "Structure validation has warnings"
     fi
 
     if ! "$VALIDATORS_DIR/validate_manifest.sh" "$PACKAGE_DIR" >/dev/null 2>&1; then
@@ -446,6 +469,225 @@ cmd_package() {
     exit 0
 }
 
+# Command: add-version
+cmd_add_version() {
+    if [ $# -lt 2 ]; then
+        log_error "Usage: ovps add-version <package-dir> <new-version>"
+        exit 1
+    fi
+
+    PACKAGE_DIR="$1"
+    NEW_VERSION="$2"
+
+    if [ ! -d "$PACKAGE_DIR" ]; then
+        log_error "Package directory not found: $PACKAGE_DIR"
+        exit 2
+    fi
+
+    log_info "Adding version $NEW_VERSION to package: $PACKAGE_DIR"
+    log_info "=================================================="
+
+    if ! "$GENERATORS_DIR/generate_version.sh" "$PACKAGE_DIR" "$NEW_VERSION"; then
+        log_error "Failed to add version"
+        exit 2
+    fi
+
+    log_success "Version $NEW_VERSION added successfully!"
+    exit 0
+}
+
+# Command: versions
+cmd_versions() {
+    if [ $# -lt 1 ]; then
+        log_error "Usage: ovps versions <package-dir>"
+        exit 1
+    fi
+
+    PACKAGE_DIR="$1"
+
+    if [ ! -d "$PACKAGE_DIR" ]; then
+        log_error "Package directory not found: $PACKAGE_DIR"
+        exit 2
+    fi
+
+    log_info "Versions for package: $PACKAGE_DIR"
+    log_info "=================================================="
+
+    CONTAINERS_DIR="$PACKAGE_DIR/containers"
+    DEPLOYED_VERSION_FILE="$PACKAGE_DIR/data/.deployed-version"
+    MANIFEST_FILE="$PACKAGE_DIR/manifest.yaml"
+
+    # Show manifest version
+    if [ -f "$MANIFEST_FILE" ]; then
+        MANIFEST_VERSION=$(grep -A 10 "^package:" "$MANIFEST_FILE" | grep "version:" | head -1 | awk '{print $2}' | tr -d '"' || true)
+        log_info "Manifest version: $MANIFEST_VERSION"
+    fi
+
+    # Show deployed version
+    if [ -f "$DEPLOYED_VERSION_FILE" ]; then
+        DEPLOYED_VERSION=$(cat "$DEPLOYED_VERSION_FILE" | tr -d '[:space:]')
+        log_info "Deployed version: $DEPLOYED_VERSION"
+    else
+        log_info "Deployed version: (not deployed)"
+    fi
+
+    log_info ""
+    log_info "Available versions in containers/:"
+
+    # List version directories
+    if [ -d "$CONTAINERS_DIR" ]; then
+        VERSION_COUNT=0
+        for version_dir in "$CONTAINERS_DIR"/*/; do
+            if [ -d "$version_dir" ]; then
+                version_name=$(basename "$version_dir")
+                # Count container files
+                file_count=$(find "$version_dir" -type f \( -name "*.tar.gz" -o -name "*.tar" -o -name "*.oci" \) 2>/dev/null | wc -l | tr -d ' ')
+                marker=""
+                if [ -f "$DEPLOYED_VERSION_FILE" ] && [ "$version_name" = "$(cat "$DEPLOYED_VERSION_FILE" | tr -d '[:space:]')" ]; then
+                    marker=" (deployed)"
+                fi
+                log_info "  $version_name - $file_count container(s)$marker"
+                VERSION_COUNT=$((VERSION_COUNT + 1))
+            fi
+        done
+
+        if [ "$VERSION_COUNT" -eq 0 ]; then
+            log_info "  (no versions found)"
+        fi
+    else
+        log_info "  (containers directory not found)"
+    fi
+
+    exit 0
+}
+
+# Command: rollback
+cmd_rollback() {
+    if [ $# -lt 1 ]; then
+        log_error "Usage: ovps rollback <package-dir> [backup-dir]"
+        exit 1
+    fi
+
+    PACKAGE_DIR="$1"
+    BACKUP_DIR="${2:-}"
+
+    if [ ! -d "$PACKAGE_DIR" ]; then
+        log_error "Package directory not found: $PACKAGE_DIR"
+        exit 2
+    fi
+
+    BACKUPS_DIR="$PACKAGE_DIR/backups"
+    COMPOSE_DIR="$PACKAGE_DIR/compose"
+    DATA_DIR="$PACKAGE_DIR/data"
+
+    # If no backup specified, list available backups
+    if [ -z "$BACKUP_DIR" ]; then
+        log_info "Available backups in $BACKUPS_DIR:"
+        log_info "=================================================="
+
+        if [ -d "$BACKUPS_DIR" ]; then
+            BACKUP_COUNT=0
+            for backup in "$BACKUPS_DIR"/*/; do
+                if [ -d "$backup" ]; then
+                    backup_name=$(basename "$backup")
+                    # Check for upgrade_info.txt
+                    if [ -f "$backup/upgrade_info.txt" ]; then
+                        from_version=$(grep "From version:" "$backup/upgrade_info.txt" | awk '{print $3}' || echo "unknown")
+                        to_version=$(grep "To version:" "$backup/upgrade_info.txt" | awk '{print $3}' || echo "unknown")
+                        log_info "  $backup_name (from $from_version to $to_version)"
+                    else
+                        log_info "  $backup_name"
+                    fi
+                    BACKUP_COUNT=$((BACKUP_COUNT + 1))
+                fi
+            done
+
+            if [ "$BACKUP_COUNT" -eq 0 ]; then
+                log_info "  (no backups found)"
+            else
+                log_info ""
+                log_info "To rollback, run:"
+                log_info "  ovps rollback $PACKAGE_DIR <backup-dir>"
+            fi
+        else
+            log_info "  (no backups directory found)"
+        fi
+        exit 0
+    fi
+
+    # Validate backup directory
+    if [ ! -d "$BACKUP_DIR" ]; then
+        # Try as relative to backups dir
+        if [ -d "$BACKUPS_DIR/$BACKUP_DIR" ]; then
+            BACKUP_DIR="$BACKUPS_DIR/$BACKUP_DIR"
+        else
+            log_error "Backup directory not found: $BACKUP_DIR"
+            exit 2
+        fi
+    fi
+
+    log_info "Rolling back from backup: $BACKUP_DIR"
+    log_info "=================================================="
+
+    # Determine compose command
+    if docker compose version >/dev/null 2>&1; then
+        COMPOSE_CMD="docker compose"
+    else
+        COMPOSE_CMD="docker-compose"
+    fi
+
+    # Step 1: Stop running services
+    log_info "Stopping running services..."
+    cd "$COMPOSE_DIR"
+    if $COMPOSE_CMD ps -q 2>/dev/null | grep -q .; then
+        $COMPOSE_CMD down 2>/dev/null || true
+        log_success "Services stopped"
+    else
+        log_info "No running services"
+    fi
+
+    # Step 2: Restore compose configuration
+    if [ -d "$BACKUP_DIR/compose" ]; then
+        log_info "Restoring compose configuration..."
+        cp -r "$BACKUP_DIR/compose/"* "$COMPOSE_DIR/" 2>/dev/null || true
+        log_success "Compose configuration restored"
+    fi
+
+    # Step 3: Restore persistent data
+    if [ -d "$BACKUP_DIR/persistent" ]; then
+        log_info "Restoring persistent data..."
+        if [ -d "$DATA_DIR/persistent" ]; then
+            rm -rf "$DATA_DIR/persistent"
+        fi
+        cp -r "$BACKUP_DIR/persistent" "$DATA_DIR/persistent"
+        log_success "Persistent data restored"
+    fi
+
+    # Step 4: Update deployed version
+    DEPLOYED_VERSION_FILE="$DATA_DIR/.deployed-version"
+    if [ -f "$BACKUP_DIR/upgrade_info.txt" ]; then
+        FROM_VERSION=$(grep "From version:" "$BACKUP_DIR/upgrade_info.txt" | awk '{print $3}' || true)
+        if [ -n "$FROM_VERSION" ] && [ "$FROM_VERSION" != "unknown" ]; then
+            echo "$FROM_VERSION" > "$DEPLOYED_VERSION_FILE"
+            log_info "Updated deployed version to: $FROM_VERSION"
+        fi
+    fi
+
+    # Step 5: Restart services
+    log_info "Restarting services..."
+    cd "$COMPOSE_DIR"
+    if $COMPOSE_CMD up -d 2>/dev/null; then
+        log_success "Services restarted"
+    else
+        log_warn "Failed to restart services automatically"
+        log_warn "Run manually: cd $COMPOSE_DIR && $COMPOSE_CMD up -d"
+    fi
+
+    log_info "=================================================="
+    log_success "Rollback completed"
+    exit 0
+}
+
 # Main entry point
 main() {
     if [ $# -lt 1 ]; then
@@ -471,6 +713,15 @@ main() {
             ;;
         package)
             cmd_package "$@"
+            ;;
+        add-version)
+            cmd_add_version "$@"
+            ;;
+        versions)
+            cmd_versions "$@"
+            ;;
+        rollback)
+            cmd_rollback "$@"
             ;;
         help|--help|-h)
             print_usage

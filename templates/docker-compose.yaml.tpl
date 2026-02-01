@@ -8,50 +8,42 @@
 
 version: "3.8"
 
-services:
-  # Example service configuration:
-  # Uncomment and modify as needed
-  #
-  # app:
-  #   image: {{VENDOR_NAME}}/{{PRODUCT_NAME}}-app:{{VERSION}}
-  #   container_name: {{PRODUCT_NAME}}-app
-  #   restart: unless-stopped
-  #   ports:
-  #     - "8080:80"
-  #   volumes:
-  #     - ../data/persistent:/app/data
-  #   environment:
-  #     - APP_ENV=production
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 40s
-  #   depends_on:
-  #     - db
-  #
-  # db:
-  #   image: {{VENDOR_NAME}}/{{PRODUCT_NAME}}-db:{{VERSION}}
-  #   container_name: {{PRODUCT_NAME}}-db
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ../data/persistent/db:/var/lib/postgresql/data
-  #   environment:
-  #     - POSTGRES_DB={{PRODUCT_NAME}}
-  #     - POSTGRES_USER={{PRODUCT_NAME}}
-  #     - POSTGRES_PASSWORD=changeme
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U {{PRODUCT_NAME}}"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+# ============================================================
+# TODO: Define your services below
+# ============================================================
+#
+# Example service configuration:
+#
+# services:
+#   app:
+#     image: {{VENDOR_NAME}}/{{PRODUCT_NAME}}-app:{{VERSION}}
+#     container_name: {{PRODUCT_NAME}}-app
+#     restart: unless-stopped
+#     ports:
+#       - "8080:80"
+#     volumes:
+#       - ../data/persistent:/app/data
+#     environment:
+#       - APP_ENV=production
+#     healthcheck:
+#       test: ["CMD", "curl", "-f", "http://localhost/health"]
+#       interval: 30s
+#       timeout: 10s
+#       retries: 3
+#       start_period: 40s
+#
+#   db:
+#     image: {{VENDOR_NAME}}/{{PRODUCT_NAME}}-db:{{VERSION}}
+#     container_name: {{PRODUCT_NAME}}-db
+#     restart: unless-stopped
+#     volumes:
+#       - ../data/persistent/db:/var/lib/postgresql/data
+#     environment:
+#       - POSTGRES_DB={{PRODUCT_NAME}}
+#       - POSTGRES_USER={{PRODUCT_NAME}}
+#       - POSTGRES_PASSWORD=changeme
 
-  # Placeholder service - replace with actual services
-  placeholder:
-    image: alpine:latest
-    container_name: {{PRODUCT_NAME}}-placeholder
-    command: ["echo", "Replace this placeholder with actual services"]
+services: {}
 
 # Networks (optional - Docker creates default network)
 # networks:

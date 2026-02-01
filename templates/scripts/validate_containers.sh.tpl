@@ -5,8 +5,9 @@
 # This script validates container images in the package and optionally
 # loads them into the local Docker daemon.
 #
-# Usage: validate_containers.sh [--load]
-#   --load    Load container images into Docker (default: validate only)
+# Usage: validate_containers.sh [--load] [--version <version>]
+#   --load              Load container images into Docker (default: validate only)
+#   --version <version> Specify version directory to use (default: {{VERSION}})
 #
 # Exit codes:
 #   0 - All containers valid
@@ -19,19 +20,29 @@ set -e
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"
-CONTAINERS_DIR="$PACKAGE_DIR/containers/{{VERSION}}"
 CHECKSUMS_FILE="$PACKAGE_DIR/checksums/sha256.txt"
 
 LOAD_IMAGES=0
+TARGET_VERSION="{{VERSION}}"
 
 # Parse arguments
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --load)
             LOAD_IMAGES=1
+            shift
+            ;;
+        --version)
+            TARGET_VERSION="$2"
+            shift 2
+            ;;
+        *)
+            shift
             ;;
     esac
 done
+
+CONTAINERS_DIR="$PACKAGE_DIR/containers/$TARGET_VERSION"
 
 # Logging functions
 log_info() {
@@ -50,7 +61,7 @@ log_warn() {
     printf '[WARN] %s\n' "$1" >&2
 }
 
-log_info "Validating containers for {{VENDOR_NAME}}/{{PRODUCT_NAME}} {{VERSION}}"
+log_info "Validating containers for {{VENDOR_NAME}}/{{PRODUCT_NAME}} $TARGET_VERSION"
 log_info "=================================================="
 log_info "Container directory: $CONTAINERS_DIR"
 
@@ -67,6 +78,33 @@ if [ -z "$CONTAINER_FILES" ]; then
     log_warn "No container image files found in $CONTAINERS_DIR"
     log_warn "Expected formats: .tar.gz, .tar, or .oci"
     exit 0
+fi
+
+# Validate containers.yaml if present
+CONTAINERS_YAML="$CONTAINERS_DIR/containers.yaml"
+if [ -f "$CONTAINERS_YAML" ]; then
+    log_info "Validating containers.yaml manifest..."
+
+    # Extract listed files from containers.yaml (basic parsing)
+    LISTED_FILES=$(grep -E "^\s*-\s*file:" "$CONTAINERS_YAML" 2>/dev/null | sed 's/.*file:[[:space:]]*//' | tr -d '"' || true)
+
+    for listed_file in $LISTED_FILES; do
+        if [ -n "$listed_file" ]; then
+            if [ ! -f "$CONTAINERS_DIR/$listed_file" ]; then
+                log_warn "containers.yaml lists file not found: $listed_file"
+            else
+                log_info "Verified: $listed_file (listed in containers.yaml)"
+            fi
+        fi
+    done
+
+    # Check for files not listed in containers.yaml
+    for container_file in $CONTAINER_FILES; do
+        filename=$(basename "$container_file")
+        if ! echo "$LISTED_FILES" | grep -q "^$filename$"; then
+            log_warn "File not listed in containers.yaml: $filename"
+        fi
+    done
 fi
 
 # Count and list containers
@@ -98,7 +136,7 @@ for container_file in $CONTAINER_FILES; do
     # Verify checksum if checksums file exists
     if [ -f "$CHECKSUMS_FILE" ]; then
         # Get relative path for checksum lookup
-        rel_path="containers/{{VERSION}}/$filename"
+        rel_path="containers/$TARGET_VERSION/$filename"
         expected_checksum=$(grep "$rel_path" "$CHECKSUMS_FILE" 2>/dev/null | awk '{print $1}' || true)
 
         if [ -n "$expected_checksum" ]; then
@@ -151,6 +189,14 @@ for container_file in $CONTAINER_FILES; do
         *.oci)
             # OCI format validation
             log_info "OCI format detected: $filename"
+            # Check if it's a tar archive (OCI tar format)
+            if tar -tf "$container_file" >/dev/null 2>&1; then
+                log_success "Valid OCI tar archive: $filename"
+            elif [ -d "$container_file" ]; then
+                log_success "Valid OCI directory: $filename"
+            else
+                log_warn "Cannot validate OCI format: $filename"
+            fi
             ;;
     esac
 
@@ -173,7 +219,37 @@ for container_file in $CONTAINER_FILES; do
                 fi
                 ;;
             *.oci)
-                log_warn "OCI format loading not yet implemented"
+                # OCI format loading
+                # Try skopeo first (supports OCI directory format)
+                if command -v skopeo >/dev/null 2>&1; then
+                    if [ -d "$container_file" ]; then
+                        # OCI directory format - extract image name from index.json
+                        log_info "Loading OCI directory with skopeo..."
+                        # Get image reference from manifest
+                        if ! skopeo copy "oci:$container_file" "docker-daemon:${filename%.oci}:latest" 2>&1; then
+                            log_error "Failed to load OCI directory: $filename"
+                            ERRORS=$((ERRORS + 1))
+                            continue
+                        fi
+                    else
+                        # OCI tar format - try docker load first
+                        log_info "Loading OCI tar archive..."
+                        if ! docker load < "$container_file" 2>&1; then
+                            log_error "Failed to load OCI tar: $filename"
+                            ERRORS=$((ERRORS + 1))
+                            continue
+                        fi
+                    fi
+                else
+                    # No skopeo - try docker load (works for OCI tar format)
+                    log_info "Loading OCI archive with docker load..."
+                    if ! docker load < "$container_file" 2>&1; then
+                        log_warn "docker load failed for OCI format"
+                        log_warn "Install skopeo for full OCI support"
+                        ERRORS=$((ERRORS + 1))
+                        continue
+                    fi
+                fi
                 ;;
         esac
         log_success "Loaded: $filename"

@@ -17,9 +17,9 @@ PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"
 COMPOSE_DIR="$PACKAGE_DIR/compose"
 MANIFEST_FILE="$PACKAGE_DIR/manifest.yaml"
 
-# Configuration
-HEALTH_CHECK_TIMEOUT=30
-HEALTH_CHECK_RETRIES=3
+# Configuration (can be overridden via environment variables)
+HEALTH_CHECK_TIMEOUT="${OVPS_HEALTH_CHECK_TIMEOUT:-30}"
+HEALTH_CHECK_RETRIES="${OVPS_HEALTH_CHECK_RETRIES:-3}"
 
 # Logging functions
 log_info() {

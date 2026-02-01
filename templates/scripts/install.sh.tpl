@@ -19,6 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"
 COMPOSE_DIR="$PACKAGE_DIR/compose"
 
+# Configurable wait times (can be overridden via environment variables)
+INIT_WAIT="${OVPS_INIT_WAIT:-5}"
+HEALTH_WAIT="${OVPS_HEALTH_WAIT:-10}"
+
 # Logging functions
 log_info() {
     printf '[INFO] %s\n' "$1"
@@ -141,8 +145,7 @@ fi
 # Change to compose directory and start
 cd "$COMPOSE_DIR"
 
-log_info "Pulling any missing images..."
-$COMPOSE_CMD pull 2>/dev/null || log_warn "Pull skipped (offline mode or images already loaded)"
+log_info "Using pre-loaded local images (offline mode)"
 
 log_info "Starting services..."
 if ! $COMPOSE_CMD up -d; then
@@ -154,18 +157,23 @@ log_success "Services started"
 
 # Step 6: Wait for services and run health check
 log_step "Running health checks"
-log_info "Waiting for services to initialize..."
-sleep 5
+log_info "Waiting for services to initialize (${INIT_WAIT}s)..."
+sleep "$INIT_WAIT"
 
 if ! "$SCRIPT_DIR/healthcheck.sh"; then
-    log_warn "Initial health check failed, waiting longer..."
-    sleep 10
+    log_warn "Initial health check failed, waiting longer (${HEALTH_WAIT}s)..."
+    sleep "$HEALTH_WAIT"
     if ! "$SCRIPT_DIR/healthcheck.sh"; then
         log_error "Health check failed after extended wait"
         log_error "Check logs with: $COMPOSE_CMD logs"
         exit 5
     fi
 fi
+
+# Track deployed version
+DEPLOYED_VERSION_FILE="$PACKAGE_DIR/data/.deployed-version"
+echo "{{VERSION}}" > "$DEPLOYED_VERSION_FILE"
+log_info "Recorded deployed version: {{VERSION}}"
 
 # Installation complete
 log_info "=================================================="

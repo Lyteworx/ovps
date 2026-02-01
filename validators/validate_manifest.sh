@@ -116,6 +116,47 @@ while IFS= read -r line; do
     esac
 done < "$MANIFEST_FILE"
 
+# Cross-file validation: Check containers listed in manifest exist
+log_info "Checking container references..."
+if grep -q "^containers:" "$MANIFEST_FILE"; then
+    # Extract container filenames from manifest
+    MANIFEST_CONTAINERS=$(grep -A 100 "^containers:" "$MANIFEST_FILE" | grep -E "^\s+- file:" | sed 's/.*file:[[:space:]]*//' | tr -d '"' || true)
+
+    # Get version from manifest
+    MANIFEST_VERSION=$(grep -A 10 "^package:" "$MANIFEST_FILE" | grep "version:" | head -1 | awk '{print $2}' | tr -d '"' || true)
+    CONTAINERS_DIR="$PACKAGE_DIR/containers/$MANIFEST_VERSION"
+
+    for container_file in $MANIFEST_CONTAINERS; do
+        if [ -n "$container_file" ]; then
+            if [ ! -f "$CONTAINERS_DIR/$container_file" ]; then
+                log_warn "Container listed in manifest not found: $container_file"
+                log_warn "Expected at: $CONTAINERS_DIR/$container_file"
+            fi
+        fi
+    done
+fi
+
+# Cross-file validation: Check services match docker-compose.yaml
+log_info "Checking service references..."
+COMPOSE_FILE="$PACKAGE_DIR/compose/docker-compose.yaml"
+if [ ! -f "$COMPOSE_FILE" ]; then
+    COMPOSE_FILE="$PACKAGE_DIR/compose/docker-compose.yml"
+fi
+
+if [ -f "$COMPOSE_FILE" ] && grep -q "^services:" "$MANIFEST_FILE"; then
+    # Extract service names from manifest
+    MANIFEST_SERVICES=$(grep -A 100 "^services:" "$MANIFEST_FILE" | grep -E "^\s+- name:" | sed 's/.*name:[[:space:]]*//' | tr -d '"' || true)
+
+    for service_name in $MANIFEST_SERVICES; do
+        if [ -n "$service_name" ]; then
+            # Check if service exists in compose file
+            if ! grep -q "^[[:space:]]*${service_name}:" "$COMPOSE_FILE" 2>/dev/null; then
+                log_warn "Service listed in manifest not found in docker-compose.yaml: $service_name"
+            fi
+        fi
+    done
+fi
+
 # Report results
 if [ $ERRORS -gt 0 ]; then
     log_error "Validation failed with $ERRORS error(s)"

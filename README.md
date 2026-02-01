@@ -51,10 +51,15 @@ A framework for creating standardized vendor delivery packages for Docker/OCI-ba
 - [CLI Reference](#cli-reference)
 - [Generated Package Structure](#generated-package-structure)
 - [Complete Walkthrough](#complete-walkthrough)
+- [Version Management](#version-management)
+- [Upgrading and Rollback](#upgrading-and-rollback)
 - [For Package Creators](#for-package-creators)
 - [For Vendors](#for-vendors)
 - [Secrets and Environment Configuration](#secrets-and-environment-configuration)
 - [Validation](#validation)
+- [Testing](#testing)
+- [CI/CD Integration](#cicd-integration)
+- [AI Agent Prompts](#ai-agent-prompts)
 - [Best Practices](#best-practices)
 - [Troubleshooting](#troubleshooting)
 - [FAQ](#faq)
@@ -256,11 +261,16 @@ curl http://localhost:8080
 OVPS - OCI Vendor Package Scaffolder v1.0.0
 
 Usage:
-  ovps new <vendor> <product> <version> [output-dir]
-  ovps validate <package-dir>
-  ovps checksums <package-dir>
-  ovps help
-  ovps --version
+  ovps new <vendor> <product> <version> [output-dir]   Create new package
+  ovps validate <package-dir>                          Validate package
+  ovps checksums <package-dir>                         Generate checksums
+  ovps finalize <package-dir>                          Prepare for distribution
+  ovps package <package-dir> [output.tar.gz]           Create archive
+  ovps add-version <package-dir> <version>             Add new version
+  ovps versions <package-dir>                          List versions
+  ovps rollback <package-dir> [backup-dir]             Rollback deployment
+  ovps help                                            Show help
+  ovps --version                                       Show version
 ```
 
 ### Command Details
@@ -333,6 +343,77 @@ ovps validate ./acme-webapp-v1.0.0
 ```
 
 **Output**: Creates/updates `checksums/sha256.txt` with hashes of all files.
+
+#### `ovps finalize` - Prepare for Distribution
+
+Regenerates checksums and runs full validation to prepare a package for distribution.
+
+```bash
+# Syntax
+ovps finalize <package-directory>
+
+# Examples
+ovps finalize ./acme-webapp-v1.0.0
+```
+
+#### `ovps package` - Create Distributable Archive
+
+Creates a `.tar.gz` archive ready for distribution.
+
+```bash
+# Syntax
+ovps package <package-directory> [output-file.tar.gz]
+
+# Examples
+ovps package ./acme-webapp-v1.0.0
+# Creates: acme-webapp-v1.0.0.tar.gz
+
+ovps package ./acme-webapp-v1.0.0 ./releases/acme-v1.0.0.tar.gz
+# Creates archive at specified path
+```
+
+#### `ovps add-version` - Add New Version
+
+Adds a new version to an existing package, creating the version directory and regenerating scripts.
+
+```bash
+# Syntax
+ovps add-version <package-directory> <new-version>
+
+# Examples
+ovps add-version ./acme-webapp-v1.0.0 v1.1.0
+# Creates: containers/v1.1.0/
+# Updates: manifest.yaml, scripts
+```
+
+#### `ovps versions` - List Versions
+
+Shows all available versions in a package and the currently deployed version.
+
+```bash
+# Syntax
+ovps versions <package-directory>
+
+# Example output
+[INFO] Manifest version: v1.1.0
+[INFO] Deployed version: v1.0.0
+[INFO]
+[INFO] Available versions in containers/:
+[INFO]   v1.0.0 - 2 container(s) (deployed)
+[INFO]   v1.1.0 - 2 container(s)
+```
+
+#### `ovps rollback` - Rollback Deployment
+
+Lists available backups or restores from a specific backup.
+
+```bash
+# List available backups
+ovps rollback ./acme-webapp-v1.0.0
+
+# Rollback to specific backup
+ovps rollback ./acme-webapp-v1.0.0 20240115_120000
+```
 
 ---
 
@@ -693,14 +774,117 @@ CREATE INDEX idx_events_created ON events(created_at);
 # Return to ovps directory
 cd ..
 
-# Regenerate checksums
-./ovps checksums acme-analytics-platform-v1.0.0
-
-# Validate everything
-./ovps validate acme-analytics-platform-v1.0.0
+# Finalize (checksums + validation)
+./ovps finalize acme-analytics-platform-v1.0.0
 
 # Create distribution archive
-tar -czvf acme-analytics-platform-v1.0.0.tar.gz acme-analytics-platform-v1.0.0/
+./ovps package acme-analytics-platform-v1.0.0
+# Creates: acme-analytics-platform-v1.0.0.tar.gz
+```
+
+---
+
+## Version Management
+
+OVPS supports multiple versions within a single package, enabling smooth upgrade paths.
+
+### Adding a New Version
+
+```bash
+# Add a new version to existing package
+ovps add-version ./my-package v1.1.0
+
+# This creates:
+# - containers/v1.1.0/ directory
+# - Updates manifest.yaml version
+# - Regenerates all scripts with new version
+
+# Export updated container images
+docker save myapp:v1.1.0 | gzip > my-package/containers/v1.1.0/myapp.tar.gz
+
+# Update docker-compose.yaml with new image tags
+# Then finalize
+ovps finalize my-package
+```
+
+### Listing Versions
+
+```bash
+ovps versions ./my-package
+
+# Output:
+# [INFO] Manifest version: v1.1.0
+# [INFO] Deployed version: v1.0.0
+# [INFO]
+# [INFO] Available versions in containers/:
+# [INFO]   v1.0.0 - 2 container(s) (deployed)
+# [INFO]   v1.1.0 - 2 container(s)
+```
+
+### Version Tracking
+
+OVPS tracks the deployed version in `data/.deployed-version`:
+- Created automatically by `install.sh`
+- Updated by `upgrade.sh` after successful upgrades
+- Used by `upgrade.sh` to detect current version
+- Displayed by `ovps versions` command
+
+---
+
+## Upgrading and Rollback
+
+### Upgrade Workflow
+
+```bash
+# 1. Test with dry-run first (no changes made)
+./scripts/upgrade.sh --dry-run --to-version v1.1.0
+
+# 2. Run actual upgrade
+./scripts/upgrade.sh --to-version v1.1.0
+
+# What happens:
+# - Detects current version from .deployed-version
+# - Creates backup in backups/<timestamp>/
+# - Stops current services
+# - Loads new container images
+# - Starts upgraded services
+# - Runs health check
+# - Updates .deployed-version
+```
+
+### Rollback
+
+If an upgrade fails or causes issues:
+
+```bash
+# List available backups
+ovps rollback ./my-package
+
+# Rollback to specific backup
+ovps rollback ./my-package 20240115_120000
+
+# What happens:
+# - Stops running services
+# - Restores compose configuration from backup
+# - Restores persistent data from backup
+# - Updates .deployed-version
+# - Restarts services
+```
+
+### Environment Variables
+
+Control timing with environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OVPS_INIT_WAIT` | 5 | Seconds to wait after starting services |
+| `OVPS_HEALTH_WAIT` | 10 | Seconds to wait for health checks |
+| `OVPS_HEALTH_CHECK_TIMEOUT` | 30 | HTTP health check timeout |
+| `OVPS_HEALTH_CHECK_RETRIES` | 3 | Health check retry count |
+
+```bash
+# Example: Increase wait times for slow-starting services
+OVPS_INIT_WAIT=30 OVPS_HEALTH_WAIT=60 ./scripts/install.sh
 ```
 
 ---
@@ -987,6 +1171,141 @@ The install script warns about unsafe placeholder values:
 | Script not executable | Permission issue | `chmod +x scripts/*.sh` |
 | Bash shebang | Using `#!/bin/bash` | Change to `#!/bin/sh` |
 | No services defined | Empty docker-compose.yaml | Add service definitions |
+
+---
+
+## Testing
+
+OVPS includes a comprehensive test suite to verify functionality.
+
+### Test Suite Overview
+
+| Test Suite | File | Tests | Docker Required |
+|------------|------|-------|-----------------|
+| Unit Tests | `tests/test_ovps.sh` | 61 | No |
+| Single Container | `tests/test_integration_single_container.sh` | 31 | Yes |
+| Multi-Container | `tests/test_integration_multi_container.sh` | 44 | Yes |
+| **Total** | | **136** | |
+
+### Running Tests
+
+```bash
+# Run all tests
+./tests/run-all-tests.sh
+
+# Run only unit tests (no Docker required)
+./tests/run-all-tests.sh --unit-only
+
+# Run only integration tests
+./tests/run-all-tests.sh --integration
+
+# Run specific test suites
+./tests/test_ovps.sh                              # Unit tests
+./tests/test_integration_single_container.sh      # Single container
+./tests/test_integration_multi_container.sh       # Multi-container
+```
+
+### What Tests Verify
+
+**Unit Tests** (`test_ovps.sh`):
+- All CLI commands work correctly
+- Template features (offline mode, version tracking, dry-run, etc.)
+- Generated scripts have required functionality
+
+**Integration Tests**:
+- Full install/upgrade/rollback workflow with real containers
+- Multi-version container loading
+- Health check functionality
+- Backup and restore operations
+
+---
+
+## CI/CD Integration
+
+### GitHub Actions Example
+
+```yaml
+name: Build OVPS Package
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and package
+        run: |
+          ./ovps new mycompany myapp ${{ github.ref_name }} package
+          docker build -t mycompany/myapp:${{ github.ref_name }} .
+          docker save mycompany/myapp:${{ github.ref_name }} | gzip > \
+            package/containers/${{ github.ref_name }}/myapp.tar.gz
+          ./ovps finalize package
+          ./ovps package package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ github.ref_name }}
+          path: "*.tar.gz"
+```
+
+### Makefile Integration
+
+```makefile
+VERSION ?= v1.0.0
+VENDOR := mycompany
+PRODUCT := myapp
+
+.PHONY: package test clean
+
+package:
+	./ovps new $(VENDOR) $(PRODUCT) $(VERSION) dist
+	docker save $(VENDOR)/$(PRODUCT):$(VERSION) | gzip > \
+		dist/containers/$(VERSION)/$(PRODUCT).tar.gz
+	./ovps finalize dist
+	./ovps package dist
+
+test:
+	./tests/run-all-tests.sh
+
+clean:
+	rm -rf dist *.tar.gz
+```
+
+---
+
+## AI Agent Prompts
+
+OVPS includes AI agent prompts to help users with the tool:
+
+### Available Prompts
+
+| Prompt | File | Purpose |
+|--------|------|---------|
+| OVPS Assistant | `prompts/ovps-assistant-agent.md` | Full workflow guidance, CI/CD integration |
+| Test Runner | `prompts/test-runner-agent.md` | Test execution and troubleshooting |
+
+### Using with AI Assistants
+
+These prompts can be used with Claude, GPT, or other AI assistants:
+
+1. **Copy the prompt** from the `prompts/` directory
+2. **Paste as system instructions** or at the start of a conversation
+3. **Ask questions** about OVPS usage, troubleshooting, or integration
+
+### What the Assistant Helps With
+
+- Converting existing Docker setups to OVPS packages
+- Creating new packages from scratch
+- Adding container images and configuring services
+- Testing and validating packages
+- Deploying and upgrading packages
+- CI/CD pipeline integration
+- Troubleshooting common issues
 
 ---
 
